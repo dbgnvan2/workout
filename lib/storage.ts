@@ -8,6 +8,8 @@ export interface SavedWorkout {
 }
 
 const KEY = "workout_saved_v1";
+// Monotonic counter ensures unique IDs even when called within the same millisecond
+let _idSeq = 0;
 
 export function getSavedWorkouts(): SavedWorkout[] {
   if (typeof window === "undefined") return [];
@@ -24,7 +26,7 @@ export function saveWorkout(config: WorkoutConfig, customName?: string): SavedWo
   const label =
     config.sequenceType.charAt(0).toUpperCase() + config.sequenceType.slice(1);
   const entry: SavedWorkout = {
-    id: Date.now().toString(),
+    id: `${Date.now()}-${++_idSeq}`,
     name: customName ?? `${label} · ${config.totalTime} min`,
     savedAt: new Date().toISOString(),
     config,

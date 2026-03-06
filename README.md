@@ -60,6 +60,31 @@ Open [http://localhost:3000](http://localhost:3000) on your phone or browser.
 
 ---
 
+## Testing
+
+Tests cover all three library modules with **72 tests** across **3 suites**.
+
+```bash
+npm test                 # run all tests once
+npm run test:watch       # watch mode — re-runs on file changes
+npm run test:coverage    # generate coverage report
+```
+
+### Test suites
+
+| Suite | File | What's tested |
+|---|---|---|
+| Workout logic | `__tests__/lib/workout.test.ts` | `formatTime`, `generateSegments` for all 3 modes, edge cases |
+| Storage | `__tests__/lib/storage.test.ts` | save / load / delete / cap at 10 / `formatSavedDate` |
+| Audio | `__tests__/lib/audio.test.ts` | `initAudio`, `playBeep`, `playBell`, `playFinalBell` with mocked Web Audio API |
+
+### Coverage targets (`lib/`)
+
+Run `npm run test:coverage` to see per-file line/branch coverage.
+The Web Audio API and `localStorage` are both mocked so tests run in CI without a browser or audio device.
+
+---
+
 ## Deploy to Vercel
 
 1. Push this repo to GitHub
