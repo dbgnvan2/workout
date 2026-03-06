@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Segment, WorkoutConfig, formatTime, formatClockTime } from "@/lib/workout";
+import { playBeep, playBell, playFinalBell } from "@/lib/audio";
 
 interface Props {
   config: WorkoutConfig;
@@ -25,19 +26,20 @@ function PhaseTag({ phase }: { phase: Segment["phase"] }) {
   );
 }
 
-export default function WorkoutDisplay({ config, segments, startTime, onComplete, onStop }: Props) {
+export default function WorkoutDisplay({
+  config, segments, startTime, onComplete, onStop,
+}: Props) {
   const totalDuration = config.totalTime * 60;
 
-  // Mutable state kept in a ref so the interval closure always sees fresh values
-  const stateRef = useRef({
+  // All mutable timer state lives here — never stale inside the interval closure
+  const S = useRef({
     segIndex: 0,
-    segElapsed: 0,
+    segElapsed: 0,   // seconds elapsed within current segment
     totalElapsed: 0,
     paused: false,
     done: false,
   });
 
-  // React display state (updated every second)
   const [display, setDisplay] = useState({
     segIndex: 0,
     segElapsed: 0,
@@ -45,22 +47,38 @@ export default function WorkoutDisplay({ config, segments, startTime, onComplete
     paused: false,
   });
 
-  // Run the timer
+  // ── Main timer ──────────────────────────────────────────────────────────
   useEffect(() => {
     const interval = setInterval(() => {
-      const s = stateRef.current;
+      const s = S.current;
       if (s.paused || s.done) return;
 
       s.totalElapsed += 1;
-      s.segElapsed += 1;
+      s.segElapsed   += 1;
 
-      // Advance through segments
+      // ── Audio: countdown beep (check BEFORE advancing segment) ──
+      const curSeg = segments[s.segIndex];
+      if (curSeg) {
+        const segTimeLeft = curSeg.duration - s.segElapsed;
+        if (segTimeLeft >= 1 && segTimeLeft <= 10) {
+          playBeep();
+        }
+      }
+
+      // ── Advance through completed segments ──
+      let segChanged = false;
       while (
         s.segIndex < segments.length &&
         s.segElapsed >= segments[s.segIndex].duration
       ) {
         s.segElapsed -= segments[s.segIndex].duration;
         s.segIndex++;
+        segChanged = true;
+      }
+
+      // ── Audio: ding-a-ling on interval completion ──
+      if (segChanged && s.segIndex < segments.length) {
+        playBell();
       }
 
       setDisplay({
@@ -70,31 +88,36 @@ export default function WorkoutDisplay({ config, segments, startTime, onComplete
         paused: s.paused,
       });
 
+      // ── Workout done ──
       if (s.totalElapsed >= totalDuration || s.segIndex >= segments.length) {
         s.done = true;
         clearInterval(interval);
+        playFinalBell();
         onComplete(s.totalElapsed);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  // Only run once on mount; segments/config won't change mid-workout
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function togglePause() {
-    stateRef.current.paused = !stateRef.current.paused;
+    S.current.paused = !S.current.paused;
     setDisplay((d) => ({ ...d, paused: !d.paused }));
   }
 
-  const safeIdx = Math.min(display.segIndex, segments.length - 1);
+  // ── Derived display values ───────────────────────────────────────────────
+  const safeIdx    = Math.min(display.segIndex, segments.length - 1);
   const currentSeg = segments[safeIdx];
-  const nextSeg = segments[safeIdx + 1];
+  const nextSeg    = segments[safeIdx + 1];
 
-  const segTimeLeft = currentSeg ? Math.max(0, currentSeg.duration - display.segElapsed) : 0;
+  const segTimeLeft   = currentSeg ? Math.max(0, currentSeg.duration - display.segElapsed) : 0;
   const totalTimeLeft = Math.max(0, totalDuration - display.totalElapsed);
-  const segProgress = currentSeg ? Math.min(1, display.segElapsed / currentSeg.duration) : 1;
+  const segProgress   = currentSeg ? Math.min(1, display.segElapsed / currentSeg.duration) : 1;
   const totalProgress = Math.min(1, display.totalElapsed / totalDuration);
+
+  // Pulse red during last 10 seconds of interval
+  const isCountdown = segTimeLeft > 0 && segTimeLeft <= 10;
 
   const phaseStyle = {
     low:  { ring: "ring-sky-500",    bar: "bg-sky-500",    text: "text-sky-400"    },
@@ -136,18 +159,29 @@ export default function WorkoutDisplay({ config, segments, startTime, onComplete
         </p>
       </div>
 
-      {/* Current segment */}
+      {/* Current segment card */}
       {currentSeg && (
-        <div className={`rounded-2xl bg-zinc-900 ring-2 ${style.ring} p-5 flex flex-col gap-4`}>
+        <div
+          className={`rounded-2xl bg-zinc-900 ring-2 ${style.ring} p-5 flex flex-col gap-4
+            ${isCountdown ? "animate-pulse" : ""}`}
+        >
           <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-zinc-300 truncate pr-2">{currentSeg.label}</span>
+            <span className="text-sm font-semibold text-zinc-300 truncate pr-2">
+              {currentSeg.label}
+            </span>
             <PhaseTag phase={currentSeg.phase} />
           </div>
 
           {/* Big interval countdown */}
           <div className="text-center py-2">
-            <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Interval Time Left</p>
-            <p className={`text-7xl font-black tabular-nums tracking-tighter ${style.text}`}>
+            <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">
+              {isCountdown ? "⚠ Interval Time Left" : "Interval Time Left"}
+            </p>
+            <p
+              className={`text-7xl font-black tabular-nums tracking-tighter transition-colors ${
+                isCountdown ? "text-red-400" : style.text
+              }`}
+            >
               {formatTime(segTimeLeft)}
             </p>
           </div>
@@ -155,7 +189,9 @@ export default function WorkoutDisplay({ config, segments, startTime, onComplete
           {/* Segment progress bar */}
           <div className="h-3 rounded-full bg-zinc-800 overflow-hidden">
             <div
-              className={`h-full rounded-full ${style.bar} transition-[width] duration-1000 ease-linear`}
+              className={`h-full rounded-full transition-[width] duration-1000 ease-linear ${
+                isCountdown ? "bg-red-500" : style.bar
+              }`}
               style={{ width: `${segProgress * 100}%` }}
             />
           </div>
@@ -192,7 +228,7 @@ export default function WorkoutDisplay({ config, segments, startTime, onComplete
         </div>
       ) : (
         <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800 p-4 text-center text-sm text-zinc-500">
-          Final segment — finish strong!
+          Final segment — finish strong! 💪
         </div>
       )}
 
